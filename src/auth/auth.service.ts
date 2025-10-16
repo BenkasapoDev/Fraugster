@@ -4,6 +4,8 @@ import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import * as jwt from 'jsonwebtoken';
 import { createChildLogger } from '../logger/winston.logger';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class AuthService {
@@ -11,11 +13,15 @@ export class AuthService {
     private cachedToken: string | null = null;
     private tokenExpiryTime: Date | null = null;
     private tokenIssuedAt: Date | null = null;
+    private readonly tokenCacheFile = path.join(process.cwd(), '.token-cache.json');
 
     constructor(
         private readonly httpService: HttpService,
         private readonly configService: ConfigService,
-    ) { }
+    ) {
+        // Load token from file on service initialization
+        this.loadTokenFromFile();
+    }
 
     /**
      * Authenticate with Fraugster API and cache the token
@@ -55,6 +61,9 @@ export class AuthService {
             // Decode JWT token to extract real expiry time
             this.decodeAndCacheToken(token);
 
+            // Save token to file for persistence
+            this.saveTokenToFile();
+
             this.logger.log(`Authentication successful, token cached until ${this.tokenExpiryTime?.toISOString()}`);
 
             return authData;
@@ -80,6 +89,52 @@ export class AuthService {
                 // Network or other error
                 throw new HttpException('Authentication service temporarily unavailable', HttpStatus.SERVICE_UNAVAILABLE);
             }
+        }
+    }
+
+    /**
+     * Load token from file if it exists and is still valid
+     */
+    private loadTokenFromFile(): void {
+        try {
+            if (fs.existsSync(this.tokenCacheFile)) {
+                const data = fs.readFileSync(this.tokenCacheFile, 'utf-8');
+                const cached = JSON.parse(data);
+
+                // Check if token is still valid
+                const expiryTime = new Date(cached.expiryTime);
+                if (expiryTime > new Date()) {
+                    this.cachedToken = cached.token;
+                    this.tokenExpiryTime = expiryTime;
+                    this.tokenIssuedAt = cached.issuedAt ? new Date(cached.issuedAt) : null;
+
+                    const timeRemaining = expiryTime.getTime() - Date.now();
+                    const hoursRemaining = (timeRemaining / (1000 * 60 * 60)).toFixed(2);
+                    this.logger.log(`📂 Loaded cached token from file (${hoursRemaining} hours remaining)`);
+                } else {
+                    this.logger.log('📂 Cached token in file has expired, will re-authenticate');
+                    fs.unlinkSync(this.tokenCacheFile); // Delete expired token
+                }
+            }
+        } catch (error) {
+            this.logger.warn('Failed to load token from file:', error?.message);
+        }
+    }
+
+    /**
+     * Save token to file for persistence across server restarts
+     */
+    private saveTokenToFile(): void {
+        try {
+            const data = {
+                token: this.cachedToken,
+                expiryTime: this.tokenExpiryTime?.toISOString(),
+                issuedAt: this.tokenIssuedAt?.toISOString(),
+            };
+            fs.writeFileSync(this.tokenCacheFile, JSON.stringify(data, null, 2), 'utf-8');
+            this.logger.debug('💾 Token saved to file');
+        } catch (error) {
+            this.logger.error('Failed to save token to file:', error?.message);
         }
     }
 
@@ -138,7 +193,9 @@ export class AuthService {
     async getValidToken(): Promise<string> {
         // Check if we have a valid cached token
         if (this.cachedToken && this.tokenExpiryTime && new Date() < this.tokenExpiryTime) {
-            this.logger.debug('Using cached token');
+            const timeRemaining = this.tokenExpiryTime.getTime() - Date.now();
+            const hoursRemaining = (timeRemaining / (1000 * 60 * 60)).toFixed(2);
+            this.logger.log(`✅ Using cached token (${hoursRemaining} hours remaining)`);
             return this.cachedToken;
         }
 
@@ -262,7 +319,18 @@ export class AuthService {
         this.cachedToken = null;
         this.tokenExpiryTime = null;
         this.tokenIssuedAt = null;
-        this.logger.log('Token cache cleared');
+
+        // Delete token file
+        try {
+            if (fs.existsSync(this.tokenCacheFile)) {
+                fs.unlinkSync(this.tokenCacheFile);
+                this.logger.log('Token cache cleared (memory and file)');
+            } else {
+                this.logger.log('Token cache cleared (memory only)');
+            }
+        } catch (error) {
+            this.logger.error('Failed to delete token file:', error?.message);
+        }
     }
 
     /**

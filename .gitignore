@@ -42,6 +42,9 @@ lerna-debug.log*
 .env.production.local
 .env.local
 
+# Token cache file (contains sensitive authentication tokens)
+.token-cache.json
+
 # temp directory
 .temp
 .tmp

@@ -11,7 +11,7 @@ export class TransactionService {
      */
     async sendTransaction(transactionData: any): Promise<any> {
         return this.authService.makeAuthenticatedRequest(
-            '/api/v2/transactions',
+            '/api/v2/transaction',
             'POST',
             transactionData,
         );
