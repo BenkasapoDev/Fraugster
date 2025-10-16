@@ -212,11 +212,14 @@ export class AuthService {
      * Make an authenticated API call to Fraugster with automatic token refresh on 401
      */
     async makeAuthenticatedRequest(endpoint: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST', data?: any): Promise<any> {
-        const baseUrl = this.configService.get<string>('FRAUGSTER_BASE_URL') || 'https://api.fraugsterapi.com';
+        const baseUrl = this.configService.get<string>('FRAUGSTER_BASE_URL');
         const url = `${baseUrl}${endpoint}`;
 
         try {
             const token = await this.getValidToken();
+
+            // Add delay to prevent rate limiting (1 second between requests)
+            await new Promise(resolve => setTimeout(resolve, 1000));
 
             // Make the API call with the token
             const response = await firstValueFrom(
@@ -227,6 +230,7 @@ export class AuthService {
                     headers: {
                         'Authorization': `SessionToken ${token}`,
                         'Content-Type': 'application/json',
+                        'User-Agent': 'Fraugster-Integration/1.0',
                     },
                 }),
             );
@@ -251,6 +255,9 @@ export class AuthService {
                 try {
                     const newToken = await this.getValidToken();
 
+                    // Add delay before retry to prevent rate limiting
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+
                     // Retry the request with new token
                     const response = await firstValueFrom(
                         this.httpService.request({
@@ -260,6 +267,7 @@ export class AuthService {
                             headers: {
                                 'Authorization': `SessionToken ${newToken}`,
                                 'Content-Type': 'application/json',
+                                'User-Agent': 'Fraugster-Integration/1.0',
                             },
                         }),
                     );
