@@ -380,9 +380,21 @@ export class AuthService {
                     });
                     return response?.data;
                 } catch (retryError: any) {
-                    this.logger.error('Request failed after token refresh:', {
-                        statusCode: retryError?.response?.status,
-                        errorData: retryError?.response?.data,
+                    this.logger.error('❌ Request failed after token refresh', {
+                        error: {
+                            statusCode: retryError?.response?.status,
+                            statusText: retryError?.response?.statusText,
+                            message: retryError?.response?.data?.message || retryError?.message,
+                            data: retryError?.response?.data
+                        },
+                        request: {
+                            endpoint,
+                            method,
+                            url,
+                            attempt: 'retry_after_token_refresh'
+                        },
+                        timestamp: new Date().toISOString(),
+                        severity: 'CRITICAL'
                     });
                     throw new HttpException(
                         retryError?.response?.data || 'Request failed after re-authentication',
@@ -391,13 +403,49 @@ export class AuthService {
                 }
             }
 
+            // For rate limiting errors
+            if (statusCode === 400 && error?.response?.data?.message?.includes('rate limit')) {
+                this.logger.error('🚫 Rate limit exceeded', {
+                    error: {
+                        statusCode,
+                        message: error?.response?.data?.message,
+                        rateLimitType: 'api_enforced'
+                    },
+                    request: {
+                        endpoint,
+                        method,
+                        url,
+                        hasData: !!data
+                    },
+                    suggestion: 'increase_delay_or_check_request_frequency',
+                    timestamp: new Date().toISOString(),
+                    severity: 'HIGH'
+                });
+                throw new HttpException('Enforce rate limit', HttpStatus.TOO_MANY_REQUESTS);
+            }
+
             // For other errors, throw immediately
             const errorData = error?.response?.data;
-            this.logger.error('API request failed:', {
-                statusCode,
-                statusText: error?.response?.statusText,
-                errorData,
-                endpoint,
+            this.logger.error('❌ API request failed', {
+                error: {
+                    statusCode,
+                    statusText: error?.response?.statusText,
+                    message: errorData?.message || errorData?.error || errorData?.error_msg || 'Unknown error',
+                    data: errorData,
+                    stack: error?.stack
+                },
+                request: {
+                    endpoint,
+                    method,
+                    url,
+                    hasData: !!data,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'SessionToken [HIDDEN]'
+                    }
+                },
+                timestamp: new Date().toISOString(),
+                severity: statusCode >= 500 ? 'CRITICAL' : statusCode >= 400 ? 'HIGH' : 'MEDIUM'
             });
 
             // Build a clear error message
