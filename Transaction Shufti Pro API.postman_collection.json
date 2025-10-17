@@ -1,0 +1,142 @@
+{
+	"info": {
+		"_postman_id": "d1411e51-e9f6-41b3-9234-c0f65cd8c55d",
+		"name": "Transaction Shufti Pro API",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "15865561",
+		"_collection_link": "https://crimson-desert-532920.postman.co/workspace/Infoset-Integrations~2154ebc6-6373-46a6-b316-1d57667b7cdb/collection/15865561-d1411e51-e9f6-41b3-9234-c0f65cd8c55d?action=share&source=collection_link&creator=15865561"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"request": {
+				"auth": {
+					"type": "basic",
+					"basic": [
+						{
+							"key": "username",
+							"value": "{{token}}",
+							"type": "string"
+						},
+						{
+							"key": "password",
+							"value": "{{password}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [],
+				"url": {
+					"raw": "https://api.fraugsterapi.com/api/v2/sessions",
+					"protocol": "https",
+					"host": [
+						"api",
+						"fraugsterapi",
+						"com"
+					],
+					"path": [
+						"api",
+						"v2",
+						"sessions"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Transaction",
+			"request": {
+				"auth": {
+					"type": "digest",
+					"digest": [
+						{
+							"key": "algorithm",
+							"value": "MD5",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "SessionToken eyJhbGciOiJSUzI1NiIsImtpZCI6IkVCQzc4QzQwNDQ3NUY5RTMiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiIiLCJleHAiOjE3NjA3MjM2NTksImlhdCI6MTc2MDYzNzI1OCwiaXNzIjoiZnJhdWdzdGVyIiwianRpIjoiYTM2OTRkOTQtMmJmNi00Njg3LTliMDItN2ZhYWM3YWM5YTg4Iiwic2NwIjpbIm1lcmNoYW50LWFwaSIsImNsaWVudC5uZm9zZXRncm91cCJdLCJzdWIiOiJuZm9zZXRncm91cCJ9.EdbItNKvKdS47JdG1TO-FvzPiaF5VmIzgE-rrn1QacQjHR9u_41TotPBe1QG0MWcBVzKFFyi61kxs-_3BSmJn6KA1t19tGL6LJgedn1Pq9pTGfc_8o8Ck3JlFgzJdGuEOLSq92PnP3ntqrrK8ByouNEL-Gav8Zsk_FN-AHWmaKTDOI6qFlICYera0oPK6ZiaTgI2yjpCO0U0nSShQgDFHJsz_-tPRDolo-4ebybWQhIPQdjWfxbhp6S1lgBmknYoC-d29gNAw86OItApOpgFeCbXNvLz4bj7l3FfuHGzm40zJRR0hE6tmQBIYO_5HAd3abpBtWnytT_aZJPJMHi7vA",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"platform_id\": \"Flexpaie\",\r\n  \"trans_id\": \"d72xfdil9158849utnnf\",\r\n  \"order_id\": \"000000999150045455921\",\r\n /*  \"items\": [\r\n    {\r\n      \"item_id\": 42,\r\n      \"unique_item_id\": \"42-FA12987-089723\",\r\n      \"item_desc\": \"Jacket\",\r\n      \"additional_description\": \"Red | Size M\",\r\n      \"item_amt\": 44.99,\r\n      \"discount\": 8.45,\r\n      \"tax_rate\": 19,\r\n      \"quantity\": 1\r\n    }\r\n  ], */\r\n  \"trans_amt\": 9.99,// montant\r\n  \"trans_currency\": \"CDF\",// ou bien utilisé le \"CDF\"\r\n  \"trans_ts\": \"2025-10-16T18:21:21.000Z\",\r\n  \"pmt_method\": \"card\",\r\n  \"cc_num_hash\": \"745rcsljDUZBC45d7esl25584/j38fbD98bnf834nd7=\",\r\n   \"cc_bin\": \"408132\",\r\n  \"cc_last_4_dig\": \"8428\",\r\n  \"bin_brand\": \"Visa\",\r\n  \"cc_exp_dt\": \"042029\",\r\n\r\n  \"bill_ad_city\": \"Kinshasa\",\r\n  \"bill_ad_ctry\": \"CD\",//\"CD\"\r\n  \"bill_ad_line1\": \"17 Avenue Safoutiers\",\r\n \r\n  \"cust_email\": \"nadine.k@gmail.com\",\r\n  \"cust_last_name\": \"Kasongo\",\r\n  \"cust_first_name\": \"Nadine\",\r\n  \"cust_name_title\": \"Ms\",\r\n  \"cust_id\": \"1084\",\r\n  /* \"ship_ad_last_name\": \"Hopper\",\r\n  \"ship_ad_first_name\": \"Grace\",\r\n  \"ship_name_title\": \"Ms\",\r\n  \"ship_ad_city\": \"New York\",\r\n  \"ship_ad_ctry\": \"US\",\r\n  \"ship_ad_line1\": \"1234 Toonville Court 1\",\r\n  \"ship_ad_zip\": \"98765\", */\r\n  \"ip\": \"156.0.198.86\"\r\n  //\"sub_seller\": \"9991\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://api.fraugsterapi.com/api/v2/transaction",
+					"protocol": "https",
+					"host": [
+						"api",
+						"fraugsterapi",
+						"com"
+					],
+					"path": [
+						"api",
+						"v2",
+						"transaction"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Update Transaction",
+			"request": {
+				"auth": {
+					"type": "digest",
+					"digest": [
+						{
+							"key": "algorithm",
+							"value": "MD5",
+							"type": "string"
+						}
+					]
+				},
+				"method": "PATCH",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "SessionToken eyJhbGciOiJSUzI1NiIsImtpZCI6IkVCQzc4QzQwNDQ3NUY5RTMiLCJ0eXAiOiJKV1QifQ.eyJhdWQiOiIiLCJleHAiOjE3NjA0NjYxODIsImlhdCI6MTc2MDM3OTc4MiwiaXNzIjoiZnJhdWdzdGVyIiwianRpIjoiMzJkNTAzYTMtODBiZi00ZDQxLWE2ODQtMzk0ODRjMTJmOGY0Iiwic2NwIjpbIm1lcmNoYW50LWFwaSIsImNsaWVudC5uZm9zZXRncm91cCJdLCJzdWIiOiJuZm9zZXRncm91cCJ9.w7HsxhND3LqKXo-T895XvOYrQCAFxIAi6svlF2vl2PYDtzt8TlgPqfkVthGtkiRy37f-qwKKYY7k13gnhIWrDQlEdWPvAsmHPg6ivjdaHSB4wcKO-PLLIeedpqe9X1vko9tDtL-bAsxok8b9gKmhgvzyxZAGgWco_uApIMUNU82D3i1cF-ue5B2r1dQrVeLqheZTDKZO9MCiFCGQSRuWfqaIv7q7nTG2Bcyo0Y-uDOvICOH2alDuPni1v76DVUuuK-qqw5iQS69aFMqqT5-kzEP46daLrB2cYLvHI2bS4ykfGuH5kJGzokwHxDRsDhpF36LHdWujGG6bFXMljgjCNQ",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"d72xfdil915889fu\": {\r\n    \"status\": \"approved\",\r\n    \"ts\": \"2018-08-28T15:04:05Z\",\r\n    \"acq_ref_id\": \"120100-479105-61D2C749-57E9\"\r\n  }\r\n /*  \"124sa987gjk0at61\": {\r\n    \"status\": \"frg_declined\",\r\n    \"ts\": \"2018-08-28T15:22:11Z\"\r\n  }, */\r\n/*   \"424sa987gok0at90ty\": {\r\n    \"status\": \"declined\",\r\n    \"ts\": \"2018-08-28T15:04:07Z\",\r\n    \"issuer_decline_reason\": \"Expired card\"\r\n  } */\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://api.fraugsterapi.com/api/v2/transaction",
+					"protocol": "https",
+					"host": [
+						"api",
+						"fraugsterapi",
+						"com"
+					],
+					"path": [
+						"api",
+						"v2",
+						"transaction"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
