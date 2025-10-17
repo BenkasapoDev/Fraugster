@@ -57,12 +57,24 @@ export class AuthService {
 
             const responseTime = Date.now() - startTime;
             const authData = response?.data;
-            const token = authData?.token || authData?.session_id || authData;
+
+            // Extract token - handle both object and string responses
+            let token: string;
+            if (typeof authData === 'string') {
+                token = authData;
+            } else if (authData?.sessionToken) {
+                token = authData.sessionToken;
+            } else if (authData?.token) {
+                token = typeof authData.token === 'string' ? authData.token : authData.token.sessionToken;
+            } else {
+                token = authData;
+            }
 
             this.logger.info('✅ Authentication successful', {
                 responseTime: `${responseTime}ms`,
                 tokenReceived: !!token,
                 tokenLength: token ? token.length : 0,
+                tokenType: typeof token,
                 responseStatus: response?.status,
                 timestamp: new Date().toISOString()
             });
@@ -127,7 +139,15 @@ export class AuthService {
                 // Check if token is still valid
                 const expiryTime = new Date(cached.expiryTime);
                 if (expiryTime > new Date()) {
-                    this.cachedToken = cached.token;
+                    // Extract token - handle both object and string
+                    if (typeof cached.token === 'string') {
+                        this.cachedToken = cached.token;
+                    } else if (cached.token?.sessionToken) {
+                        this.cachedToken = cached.token.sessionToken;
+                    } else {
+                        this.cachedToken = cached.token;
+                    }
+
                     this.tokenExpiryTime = expiryTime;
                     this.tokenIssuedAt = cached.issuedAt ? new Date(cached.issuedAt) : null;
 
@@ -291,13 +311,15 @@ export class AuthService {
             const token = await this.getValidToken();
 
             // Add delay to prevent rate limiting with detailed logging
+            const delaySeconds = 30; // Increased to 30 seconds
             this.logger.debug('⏱️ Applying rate limit delay', {
-                delayMs: 15000,
+                delayMs: delaySeconds * 1000,
+                delaySeconds,
                 endpoint,
                 method,
                 reason: 'prevent_api_rate_limiting'
             });
-            await new Promise(resolve => setTimeout(resolve, 15000));
+            await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
 
             const startTime = Date.now();
             // Make the API call with the token
@@ -350,11 +372,13 @@ export class AuthService {
                     const newToken = await this.getValidToken();
 
                     // Add delay before retry to prevent rate limiting
+                    const retryDelaySeconds = 30; // Increased to 30 seconds
                     this.logger.debug('⏱️ Retry delay after token refresh', {
-                        delayMs: 15000,
+                        delayMs: retryDelaySeconds * 1000,
+                        delaySeconds: retryDelaySeconds,
                         reason: 'prevent_rate_limiting_on_retry'
                     });
-                    await new Promise(resolve => setTimeout(resolve, 15000));
+                    await new Promise(resolve => setTimeout(resolve, retryDelaySeconds * 1000));
 
                     // Retry the request with new token
                     const retryStartTime = Date.now();
