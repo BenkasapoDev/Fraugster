@@ -4,8 +4,9 @@ import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import * as jwt from 'jsonwebtoken';
 import { createChildLogger } from '../logger/winston.logger';
-import * as fs from 'fs';
-import * as path from 'path';
+import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { randomUUID } from 'crypto';
 
 @Injectable()
 export class AuthService {
@@ -13,14 +14,16 @@ export class AuthService {
     private cachedToken: string | null = null;
     private tokenExpiryTime: Date | null = null;
     private tokenIssuedAt: Date | null = null;
-    private readonly tokenCacheFile = path.join(process.cwd(), '.token-cache.json');
+    private readonly serviceName = 'fraugster';
 
     constructor(
         private readonly httpService: HttpService,
         private readonly configService: ConfigService,
+        private readonly prisma: PrismaService,
+        private readonly audit: AuditService,
     ) {
-        // Load token from file on service initialization
-        this.loadTokenFromFile();
+        // Load token from database on service initialization
+        this.loadTokenFromDatabase();
     }
 
     /**
@@ -32,20 +35,22 @@ export class AuthService {
         const password = this.configService.get<string>('FRAUGSTER_PASSWORD');
         const baseUrl = this.configService.get<string>('FRAUGSTER_BASE_URL');
         const url = `${baseUrl}/api/v2/sessions`;
+        const requestId = randomUUID();
 
         if (!username || !password) {
             throw new HttpException('Username and password must be configured', HttpStatus.BAD_REQUEST);
         }
+
+        const startTime = Date.now();
 
         try {
             this.logger.info('🔐 Initiating authentication with Fraugster API', {
                 url: url.replace(/\/\/[^@]*@/, '//**:**@'), // Hide credentials in logs
                 username: username ? `${username.substring(0, 3)}***` : 'undefined',
                 timestamp: new Date().toISOString(),
-                requestId: Math.random().toString(36).substring(7)
+                requestId
             });
 
-            const startTime = Date.now();
             const response = await firstValueFrom(
                 this.httpService.post(url, {}, {
                     auth: {
@@ -55,7 +60,7 @@ export class AuthService {
                 }),
             );
 
-            const responseTime = Date.now() - startTime;
+            const duration = Date.now() - startTime;
             const authData = response?.data;
 
             // Extract token - handle both object and string responses
@@ -71,7 +76,7 @@ export class AuthService {
             }
 
             this.logger.info('✅ Authentication successful', {
-                responseTime: `${responseTime}ms`,
+                responseTime: `${duration}ms`,
                 tokenReceived: !!token,
                 tokenLength: token ? token.length : 0,
                 tokenType: typeof token,
@@ -82,8 +87,20 @@ export class AuthService {
             // Decode JWT token to extract real expiry time
             this.decodeAndCacheToken(token);
 
-            // Save token to file for persistence
-            this.saveTokenToFile();
+            // Save token to database for persistence
+            await this.saveTokenToDatabase();
+
+            // Log audit event
+            await this.audit.logAuthentication({
+                requestId,
+                duration,
+                metadata: {
+                    tokenLength: token.length,
+                    expiresAt: this.tokenExpiryTime?.toISOString(),
+                    hoursValid: this.tokenExpiryTime ?
+                        ((this.tokenExpiryTime.getTime() - Date.now()) / (1000 * 60 * 60)).toFixed(2) : 'unknown'
+                }
+            });
 
             this.logger.info('💾 Token cached successfully', {
                 expiresAt: this.tokenExpiryTime?.toISOString(),
@@ -94,6 +111,7 @@ export class AuthService {
 
             return authData;
         } catch (error: any) {
+            const duration = Date.now() - startTime;
             const statusCode = error?.response?.status;
             const statusText = error?.response?.statusText;
             const errorData = error?.response?.data;
@@ -115,6 +133,18 @@ export class AuthService {
                 severity: statusCode >= 500 ? 'CRITICAL' : statusCode >= 400 ? 'HIGH' : 'MEDIUM'
             });
 
+            // Log audit event for failed authentication
+            await this.audit.logAuthenticationFailure({
+                requestId,
+                statusCode: statusCode || 500,
+                errorMessage: errorData?.message || errorData?.error || 'Authentication failed',
+                metadata: {
+                    statusText,
+                    duration,
+                    errorData
+                }
+            });
+
             if (statusCode) {
                 // Use the actual HTTP status from the external API
                 const errorMessage = typeof errorData === 'string' ? errorData :
@@ -128,75 +158,83 @@ export class AuthService {
     }
 
     /**
-     * Load token from file if it exists and is still valid
+     * Load token from database if it exists and is still valid
      */
-    private loadTokenFromFile(): void {
+    private async loadTokenFromDatabase(): Promise<void> {
         try {
-            if (fs.existsSync(this.tokenCacheFile)) {
-                const data = fs.readFileSync(this.tokenCacheFile, 'utf-8');
-                const cached = JSON.parse(data);
+            const cached = await this.prisma.authToken.findUnique({
+                where: { serviceName: this.serviceName },
+            });
 
+            if (cached) {
                 // Check if token is still valid
-                const expiryTime = new Date(cached.expiryTime);
-                if (expiryTime > new Date()) {
-                    // Extract token - handle both object and string
-                    if (typeof cached.token === 'string') {
-                        this.cachedToken = cached.token;
-                    } else if (cached.token?.sessionToken) {
-                        this.cachedToken = cached.token.sessionToken;
-                    } else {
-                        this.cachedToken = cached.token;
-                    }
+                if (cached.expiresAt > new Date()) {
+                    this.cachedToken = cached.token;
+                    this.tokenExpiryTime = cached.expiresAt;
+                    this.tokenIssuedAt = cached.issuedAt;
 
-                    this.tokenExpiryTime = expiryTime;
-                    this.tokenIssuedAt = cached.issuedAt ? new Date(cached.issuedAt) : null;
-
-                    const timeRemaining = expiryTime.getTime() - Date.now();
+                    const timeRemaining = cached.expiresAt.getTime() - Date.now();
                     const hoursRemaining = (timeRemaining / (1000 * 60 * 60)).toFixed(2);
-                    this.logger.info('📂 Token loaded from cache file', {
-                        source: 'file',
+                    this.logger.info('📂 Token loaded from database', {
+                        source: 'database',
                         hoursRemaining: parseFloat(hoursRemaining),
-                        expiresAt: expiryTime.toISOString(),
-                        issuedAt: this.tokenIssuedAt?.toISOString(),
-                        cacheFile: this.tokenCacheFile
+                        expiresAt: cached.expiresAt.toISOString(),
+                        issuedAt: cached.issuedAt?.toISOString(),
                     });
                 } else {
                     this.logger.warn('⚠️ Cached token expired', {
-                        expiredAt: expiryTime.toISOString(),
-                        expiredHoursAgo: ((Date.now() - expiryTime.getTime()) / (1000 * 60 * 60)).toFixed(2),
-                        action: 'deleting_cache_file'
+                        expiredAt: cached.expiresAt.toISOString(),
+                        expiredHoursAgo: ((Date.now() - cached.expiresAt.getTime()) / (1000 * 60 * 60)).toFixed(2),
+                        action: 'deleting_from_database'
                     });
-                    fs.unlinkSync(this.tokenCacheFile); // Delete expired token
+                    // Delete expired token
+                    await this.prisma.authToken.delete({
+                        where: { serviceName: this.serviceName },
+                    });
                 }
             }
         } catch (error) {
-            this.logger.warn('🔧 Failed to load token from cache file', {
+            this.logger.warn('🔧 Failed to load token from database', {
                 error: error?.message,
-                cacheFile: this.tokenCacheFile,
+                serviceName: this.serviceName,
                 action: 'will_authenticate_fresh'
             });
         }
     }
 
     /**
-     * Save token to file for persistence across server restarts
+     * Save token to database for persistence across server restarts
      */
-    private saveTokenToFile(): void {
+    private async saveTokenToDatabase(): Promise<void> {
         try {
-            const data = {
-                token: this.cachedToken,
-                expiryTime: this.tokenExpiryTime?.toISOString(),
-                issuedAt: this.tokenIssuedAt?.toISOString(),
-            };
-            fs.writeFileSync(this.tokenCacheFile, JSON.stringify(data, null, 2), 'utf-8');
-            this.logger.debug('💾 Token persisted to cache file', {
-                cacheFile: this.tokenCacheFile,
+            if (!this.cachedToken || !this.tokenExpiryTime) {
+                this.logger.warn('⚠️ Cannot save token - missing token or expiry');
+                return;
+            }
+
+            await this.prisma.authToken.upsert({
+                where: { serviceName: this.serviceName },
+                create: {
+                    serviceName: this.serviceName,
+                    token: this.cachedToken,
+                    expiresAt: this.tokenExpiryTime,
+                    issuedAt: this.tokenIssuedAt || new Date(),
+                },
+                update: {
+                    token: this.cachedToken,
+                    expiresAt: this.tokenExpiryTime,
+                    issuedAt: this.tokenIssuedAt || new Date(),
+                },
+            });
+
+            this.logger.debug('💾 Token persisted to database', {
+                serviceName: this.serviceName,
                 expiresAt: this.tokenExpiryTime?.toISOString()
             });
         } catch (error) {
-            this.logger.error('❌ Failed to persist token to cache file', {
+            this.logger.error('❌ Failed to persist token to database', {
                 error: error?.message,
-                cacheFile: this.tokenCacheFile,
+                serviceName: this.serviceName,
                 impact: 'token_will_not_survive_restart'
             });
         }
@@ -288,15 +326,28 @@ export class AuthService {
         }
 
         // Token expired or doesn't exist, re-authenticate
+        const requestId = randomUUID();
+        const startTime = Date.now();
+
         this.logger.warn('🔄 Token refresh required', {
             reason: this.cachedToken ? 'expired_or_expiring_soon' : 'not_cached',
             expiresAt: this.tokenExpiryTime?.toISOString(),
-            action: 'initiating_fresh_authentication'
+            action: 'initiating_fresh_authentication',
+            requestId
         });
+
         this.cachedToken = null;
         this.tokenExpiryTime = null;
 
         const authResponse = await this.authenticate();
+
+        // Log token refresh audit event
+        await this.audit.logTokenRefresh({
+            reason: this.cachedToken ? 'expired' : 'not_cached',
+            requestId,
+            duration: Date.now() - startTime,
+        });
+
         return this.cachedToken || authResponse;
     }
 
@@ -306,6 +357,8 @@ export class AuthService {
     async makeAuthenticatedRequest(endpoint: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST', data?: any): Promise<any> {
         const baseUrl = this.configService.get<string>('FRAUGSTER_BASE_URL');
         const url = `${baseUrl}${endpoint}`;
+        const requestId = randomUUID();
+        const startTime = Date.now();
 
         try {
             const token = await this.getValidToken();
@@ -321,7 +374,7 @@ export class AuthService {
             });
             await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
 
-            const startTime = Date.now();
+            const apiStartTime = Date.now();
             // Make the API call with the token
             const response = await firstValueFrom(
                 this.httpService.request({
@@ -336,18 +389,36 @@ export class AuthService {
                 }),
             );
 
-            const responseTime = Date.now() - startTime;
+            const apiDuration = Date.now() - apiStartTime;
+            const totalDuration = Date.now() - startTime;
+
             this.logger.info('✅ API request successful', {
                 endpoint,
                 method,
                 statusCode: response?.status,
-                responseTime: `${responseTime}ms`,
+                responseTime: `${apiDuration}ms`,
+                totalTime: `${totalDuration}ms`,
                 dataSize: response?.data ? JSON.stringify(response.data).length : 0,
                 timestamp: new Date().toISOString()
             });
 
+            // Log audit event
+            await this.audit.logApiRequest({
+                endpoint,
+                method,
+                status: 'success',
+                statusCode: response?.status,
+                requestId,
+                duration: apiDuration,
+                metadata: {
+                    dataSize: response?.data ? JSON.stringify(response.data).length : 0,
+                    totalTime: totalDuration,
+                }
+            });
+
             return response?.data;
         } catch (error: any) {
+            const duration = Date.now() - startTime;
             const statusCode = error?.response?.status;
 
             // If the error is already an HttpException (from authentication), re-throw it
@@ -395,15 +466,32 @@ export class AuthService {
                         }),
                     );
 
-                    const retryTime = Date.now() - retryStartTime;
+                    const retryDuration = Date.now() - retryStartTime;
                     this.logger.info('✅ Request succeeded after token refresh', {
                         endpoint,
                         method,
-                        retryTime: `${retryTime}ms`,
+                        retryTime: `${retryDuration}ms`,
                         statusCode: response?.status
                     });
+
+                    // Log successful retry
+                    await this.audit.logApiRequest({
+                        endpoint,
+                        method,
+                        status: 'success',
+                        statusCode: response?.status,
+                        requestId,
+                        duration: retryDuration,
+                        metadata: {
+                            retry: true,
+                            reason: 'token_expired_401',
+                        }
+                    });
+
                     return response?.data;
                 } catch (retryError: any) {
+                    const retryDuration = Date.now() - startTime;
+
                     this.logger.error('❌ Request failed after token refresh', {
                         error: {
                             statusCode: retryError?.response?.status,
@@ -420,6 +508,23 @@ export class AuthService {
                         timestamp: new Date().toISOString(),
                         severity: 'CRITICAL'
                     });
+
+                    // Log failed retry
+                    await this.audit.logApiRequest({
+                        endpoint,
+                        method,
+                        status: 'error',
+                        statusCode: retryError?.response?.status || 500,
+                        requestId,
+                        duration: retryDuration,
+                        errorMessage: retryError?.response?.data?.message || retryError?.message,
+                        metadata: {
+                            retry: true,
+                            reason: 'token_expired_401',
+                            errorData: retryError?.response?.data,
+                        }
+                    });
+
                     throw new HttpException(
                         retryError?.response?.data || 'Request failed after re-authentication',
                         retryError?.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
@@ -445,6 +550,22 @@ export class AuthService {
                     timestamp: new Date().toISOString(),
                     severity: 'HIGH'
                 });
+
+                // Log rate limit error
+                await this.audit.logApiRequest({
+                    endpoint,
+                    method,
+                    status: 'error',
+                    statusCode: HttpStatus.TOO_MANY_REQUESTS,
+                    requestId,
+                    duration,
+                    errorMessage: 'Enforce rate limit',
+                    metadata: {
+                        originalStatusCode: statusCode,
+                        errorData: error?.response?.data,
+                    }
+                });
+
                 throw new HttpException('Enforce rate limit', HttpStatus.TOO_MANY_REQUESTS);
             }
 
@@ -470,6 +591,21 @@ export class AuthService {
                 },
                 timestamp: new Date().toISOString(),
                 severity: statusCode >= 500 ? 'CRITICAL' : statusCode >= 400 ? 'HIGH' : 'MEDIUM'
+            });
+
+            // Log failed request
+            await this.audit.logApiRequest({
+                endpoint,
+                method,
+                status: 'failed',
+                statusCode: statusCode || 500,
+                requestId,
+                duration,
+                errorMessage: errorData?.message || errorData?.error || error?.message,
+                metadata: {
+                    errorData,
+                    statusText: error?.response?.statusText,
+                }
             });
 
             // Build a clear error message
@@ -500,21 +636,24 @@ export class AuthService {
     /**
      * Clear cached token (useful for logout or force refresh)
      */
-    clearToken(): void {
+    async clearToken(): Promise<void> {
         this.cachedToken = null;
         this.tokenExpiryTime = null;
         this.tokenIssuedAt = null;
 
-        // Delete token file
+        // Delete token from database
         try {
-            if (fs.existsSync(this.tokenCacheFile)) {
-                fs.unlinkSync(this.tokenCacheFile);
-                this.logger.log('Token cache cleared (memory and file)');
-            } else {
-                this.logger.log('Token cache cleared (memory only)');
-            }
+            await this.prisma.authToken.delete({
+                where: { serviceName: this.serviceName },
+            });
+            this.logger.log('Token cache cleared (memory and database)');
         } catch (error) {
-            this.logger.error('Failed to delete token file:', error?.message);
+            if (error?.code === 'P2025') {
+                // Record not found - already deleted
+                this.logger.log('Token cache cleared (memory only - no database record)');
+            } else {
+                this.logger.error('Failed to delete token from database:', error?.message);
+            }
         }
     }
 
@@ -537,5 +676,12 @@ export class AuthService {
             hoursUntilExpiry: parseFloat(hoursUntilExpiry),
             isExpired: this.tokenExpiryTime ? now >= this.tokenExpiryTime : true,
         };
+    }
+
+    /**
+     * Get recent audit logs (for debugging/monitoring)
+     */
+    async getRecentAuditLogs(limit: number = 20) {
+        return this.audit.getRecentLogs(limit);
     }
 }

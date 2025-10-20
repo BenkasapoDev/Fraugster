@@ -39,4 +39,12 @@ export class AuthController {
     async getTokenInfo() {
         return this.authService.getTokenInfo();
     }
+
+    /**
+     * GET /auth/audit-logs - Get recent audit logs
+     */
+    @Get('audit-logs')
+    async getAuditLogs() {
+        return this.authService.getRecentAuditLogs();
+    }
 }

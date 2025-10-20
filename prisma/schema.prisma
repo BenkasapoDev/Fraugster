@@ -1,0 +1,81 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Token storage for persistent authentication across deployments
+model AuthToken {
+  id          Int       @id @default(autoincrement())
+  serviceName String    @unique @map("service_name") // e.g., "fraugster"
+  token       String    @db.Text // Store the actual token (can be large JWT)
+  expiresAt   DateTime  @map("expires_at")
+  issuedAt    DateTime? @map("issued_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([serviceName])
+  @@index([expiresAt])
+  @@map("auth_tokens")
+}
+
+// Audit logs for tracking all API activities and security events
+model AuditLog {
+  id           Int      @id @default(autoincrement())
+  serviceName  String   @map("service_name") // e.g., "fraugster", "auth"
+  action       String // e.g., "authenticate", "api_request", "token_refresh"
+  status       String // e.g., "success", "failed", "error"
+  statusCode   Int?     @map("status_code") // HTTP status code
+  endpoint     String? // API endpoint called
+  method       String? // HTTP method (GET, POST, etc.)
+  userId       String?  @map("user_id") // Optional user identifier
+  ipAddress    String?  @map("ip_address") // Client IP address
+  userAgent    String?  @map("user_agent") // Client user agent
+  requestId    String?  @map("request_id") // Unique request identifier
+  duration     Int? // Request duration in milliseconds
+  errorMessage String?  @map("error_message") @db.Text // Error details if failed
+  metadata     Json? // Additional context (JSON object)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([serviceName])
+  @@index([action])
+  @@index([status])
+  @@index([createdAt])
+  @@index([requestId])
+  @@map("audit_logs")
+}
+
+// Transaction records for Fraugster API submissions
+model TransactionLog {
+  id              Int      @id @default(autoincrement())
+  transactionId   String   @unique @map("transaction_id") // Fraugster transaction ID
+  platformId      String   @map("platform_id") // e.g., "Flexpaie"
+  orderId         String   @map("order_id")
+  amount          Decimal  @db.Decimal(10, 2)
+  currency        String   @db.VarChar(3) // ISO currency code
+  paymentMethod   String   @map("payment_method") // e.g., "card"
+  customerEmail   String   @map("customer_email")
+  status          String // e.g., "pending", "approved", "declined"
+  fraugsterScore  Decimal? @map("fraugster_score") @db.Decimal(5, 4) // Fraud score
+  requestPayload  Json     @map("request_payload") // Full request sent
+  responsePayload Json?    @map("response_payload") // Full response received
+  errorMessage    String?  @map("error_message") @db.Text
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([transactionId])
+  @@index([orderId])
+  @@index([customerEmail])
+  @@index([status])
+  @@index([createdAt])
+  @@map("transaction_logs")
+}
