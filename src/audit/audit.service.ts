@@ -192,4 +192,88 @@ export class AuditService {
             },
         });
     }
+
+    /**
+     * Log webhook event
+     */
+    async logWebhookEvent(data: {
+        eventType: string;
+        payload: any;
+        processed: boolean;
+        timestamp: Date;
+    }): Promise<void> {
+        try {
+            await this.prisma.auditLog.create({
+                data: {
+                    serviceName: 'fraugster',
+                    action: 'WEBHOOK_RECEIVED',
+                    status: data.processed ? 'success' : 'error',
+                    endpoint: '/webhook',
+                    method: 'POST',
+                    statusCode: 200,
+                    requestId: `webhook-${Date.now()}`,
+                    duration: 0,
+                    metadata: {
+                        eventType: data.eventType,
+                        payload: data.payload,
+                        processed: data.processed,
+                        timestamp: data.timestamp,
+                    },
+                    ipAddress: 'webhook',
+                    userAgent: 'Fraugster-Webhook',
+                },
+            });
+
+            this.logger.debug('📡 Webhook event logged', {
+                eventType: data.eventType,
+                processed: data.processed,
+            });
+        } catch (error) {
+            // Don't throw - logging should never break the app
+            this.logger.error('❌ Failed to log webhook event', {
+                error: error?.message,
+                data,
+            });
+        }
+    }
+
+    /**
+     * Log transaction event
+     */
+    async logTransaction(data: {
+        transactionId: string;
+        action: string;
+        status: string;
+        duration?: number;
+        errorMessage?: string;
+        metadata?: any;
+    }): Promise<void> {
+        try {
+            await this.prisma.auditLog.create({
+                data: {
+                    serviceName: 'fraugster',
+                    action: data.action,
+                    status: data.status,
+                    endpoint: '/api/v2/transaction',
+                    method: 'POST',
+                    requestId: data.transactionId,
+                    duration: data.duration,
+                    errorMessage: data.errorMessage,
+                    metadata: data.metadata,
+                },
+            });
+
+            this.logger.debug('💳 Transaction logged', {
+                transactionId: data.transactionId,
+                action: data.action,
+                status: data.status,
+            });
+        } catch (error) {
+            // Don't throw - logging should never break the app
+            this.logger.error('❌ Failed to log transaction', {
+                error: error?.message,
+                data,
+            });
+        }
+    }
 }
